@@ -64,12 +64,14 @@ class StreamingWorker : public AsyncProgressWorker {
  public:
   StreamingWorker(
       Callback *progress,
-      Callback *callback, 
+      Callback *callback,
       Callback *error_callback
     )
     : AsyncProgressWorker(callback), progress(progress), error_callback(error_callback)
     {
       input_closed = false;
+      isPaused = false;
+      isReady = false;
     }
   ~StreamingWorker() {}
 
@@ -95,6 +97,18 @@ class StreamingWorker : public AsyncProgressWorker {
     input_closed = true;
   }
 
+  void pause() {
+    isPaused = true;
+  }
+
+  void resume() {
+    isPaused = false;
+  }
+
+  void start() {
+    isReady = true;
+  }
+
   PCQueue<Message> fromNode;
 
  protected:
@@ -108,11 +122,20 @@ class StreamingWorker : public AsyncProgressWorker {
     return input_closed;
   }
 
+  bool paused() {
+    return isPaused;
+  }
+
+  bool ready() {
+    return isReady;
+  }
 
   Callback *progress;
   Callback *error_callback;
   PCQueue<Message> toNode;
   bool input_closed;
+  bool isPaused;
+  bool isReady;
 
 private:
   void drainQueue() {
@@ -124,7 +147,7 @@ private:
 
     for(Message & msg : contents) {
         v8::Local<v8::Value> argv[] = {
-          New<v8::String>(msg.name.c_str()).ToLocalChecked(), 
+          New<v8::String>(msg.name.c_str()).ToLocalChecked(),
           New<v8::String>(msg.data.c_str()).ToLocalChecked()
         };
         progress->Call(2, argv);
@@ -143,13 +166,16 @@ class StreamWorkerWrapper : public Nan::ObjectWrap {
 
     SetPrototypeMethod(tpl, "sendToAddon", sendToAddon);
     SetPrototypeMethod(tpl, "closeInput", closeInput);
-    
+    SetPrototypeMethod(tpl, "pause", pause);
+    SetPrototypeMethod(tpl, "resume", resume);
+    SetPrototypeMethod(tpl, "start", start);
+
     constructor().Reset(Nan::GetFunction(tpl).ToLocalChecked());
     Nan::Set(target, Nan::New("StreamingWorker").ToLocalChecked(),
       Nan::GetFunction(tpl).ToLocalChecked());
   }
 
-  
+
 
  private:
   explicit StreamWorkerWrapper(StreamingWorker * worker) : _worker(worker) {}
@@ -164,10 +190,10 @@ class StreamWorkerWrapper : public Nan::ObjectWrap {
 
       StreamWorkerWrapper *obj = new StreamWorkerWrapper(
                             create_worker(
-                                data_callback, 
-                                complete_callback, 
+                                data_callback,
+                                complete_callback,
                                 error_callback, options));
-      
+
       obj->Wrap(info.This());
       info.GetReturnValue().Set(info.This());
 
@@ -178,7 +204,7 @@ class StreamWorkerWrapper : public Nan::ObjectWrap {
       const int argc = 3;
       v8::Local<v8::Value> argv[argc] = {info[0], info[1], info[2]};
       v8::Local<v8::Function> cons = Nan::New(constructor());
-      info.GetReturnValue().Set(cons->NewInstance(argc, argv));
+      info.GetReturnValue().Set(Nan::NewInstance(cons, argc, argv).ToLocalChecked());
     }
   }
 
@@ -192,6 +218,21 @@ class StreamWorkerWrapper : public Nan::ObjectWrap {
   static NAN_METHOD(closeInput) {
     StreamWorkerWrapper* obj = Nan::ObjectWrap::Unwrap<StreamWorkerWrapper>(info.Holder());
     obj->_worker->close();
+  }
+
+  static NAN_METHOD(pause) {
+    StreamWorkerWrapper* obj = Nan::ObjectWrap::Unwrap<StreamWorkerWrapper>(info.Holder());
+    obj->_worker->pause();
+  }
+
+  static NAN_METHOD(resume) {
+    StreamWorkerWrapper* obj = Nan::ObjectWrap::Unwrap<StreamWorkerWrapper>(info.Holder());
+    obj->_worker->resume();
+  }
+
+  static NAN_METHOD(start) {
+    StreamWorkerWrapper* obj = Nan::ObjectWrap::Unwrap<StreamWorkerWrapper>(info.Holder());
+    obj->_worker->start();
   }
 
   static inline Nan::Persistent<v8::Function> & constructor() {
